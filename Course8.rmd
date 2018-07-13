@@ -1,0 +1,141 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Amit"
+date: "12 Jul 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Project Description
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise.
+
+
+## Data Processing
+
+We read the provdied Training and Testing csv files into R and examine a few sample rows to understand the variables.
+``` {r, results = "hide"}
+suppressPackageStartupMessages(library(caret))
+suppressPackageStartupMessages(library(rattle))
+
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","../course8project/pml-training.csv")
+download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","../course8project/pml-testing.csv")
+
+pmlData <- read.csv("../course8project/pml-Training.csv",na.strings=c("", "NA"))
+pmlTest <- read.csv("../course8project/pml-Testing.csv",na.strings=c("", "NA"))
+
+#Examine a few rows
+head(pmlData,2)
+head(pmlTest,2)
+
+#For columns with NA, what is the proportin of missing data?
+unique(colSums(is.na(pmlData))/nrow(pmlData))
+
+#Check for any other zero variance variables
+nearZeroVar(pmlData,saveMetrics=TRUE)
+```
+
+We can now clean the data as below:
+
+1. We see that for columns which contain missing values, the values are missing on about 98% of the rows. We remove such variables.
+
+2. Column 6 new_window is 'no' on 98% of the rows. Where this value 'yes', additional information appears in variables which are already removed in above step.
+
+3. Column 1 is just aserial number and need not be included in the prediction model.
+
+
+``` {r}
+#remove columns with NA
+pmlData <- pmlData[,colSums(is.na(pmlData))==0]
+pmlTest <- pmlTest[,colSums(is.na(pmlTest))==0]
+
+#Remove column 1 and new_window
+pmlData <- pmlData[,-c(1,6)]
+pmlTest <- pmlTest[,-c(1,6)]
+```
+
+Let's check if we have the same column names in train and test. Only difference is classe in Train and problem_id in Test.
+
+```{r}
+setdiff(names(pmlData), names(pmlTest))
+setdiff(names(pmlTest), names(pmlData))
+```
+
+
+## Data slicing for training and validation
+
+We slice our Training dataset further into 75:25 ratio for training and validating our model.
+``` {r}
+#set overall seed for reproducible results
+set.seed(1234)
+
+inTrain <- createDataPartition(y=pmlData$classe,p=0.75,list=FALSE)
+training <- pmlData[inTrain,]
+validation <- pmlData[-inTrain,]
+
+dim(training)
+dim(validation)
+```
+
+
+## Prediction Algorithms
+
+### Let us try Classification Trees with 5-fold cross validation
+```{r}
+fit_ct <- train(classe~., data=training, method="rpart", 
+                trControl=trainControl(method="cv", 5))
+fit_ct
+fancyRpartPlot(fit_ct$finalModel)
+```
+
+In sample error rate for the model is 54.5% which seems poor.
+
+### Let us now try boosting with trees with 5-fold cross validation. This model should work well with large number of predictors.
+```{r}
+fit_gbm <- train(classe~., data=training, method="gbm", 
+                trControl=trainControl(method="cv", 5), verbose=FALSE)
+fit_gbm
+```
+
+In sample error rate for the model is 0.32%.
+We will now validate our model with our validation dataset.
+
+```{r}
+pred_gbm <- predict(fit_gbm, validation)
+confusionMatrix(validation$classe, pred_gbm)
+```
+
+Accuracy for the model with our validation dataset is 99.73% and Out of sample error rate is 0.37%.
+
+### Let us try Random Forests with 5-fold cross validation
+```{r}
+fit_rf <- train(classe~., data=training, method="rf", 
+                trControl=trainControl(method="cv", 5))
+fit_rf
+```
+
+In sample error rate for the model is  0.11%.
+We will now validate our model with our validation dataset.
+
+```{r}
+pred_rf <- predict(fit_rf, validation)
+confusionMatrix(validation$classe, pred_rf)
+```
+
+Accuracy for the model with our validation dataset is 99.94% and Out of sample error rate is 0.06%.
+
+
+##Conclusion
+
+Though Randon Forests takes much longer to build the model, accuracy is very high and better than Gradient Boosting Method.
+We use this model to predict on given testing data.
+
+```{r}
+pred <- predict(fit_rf, pmlTest)
+results <- cbind.data.frame(pmlTest$problem_id,pred)
+names(results) <- c('Problem ID', 'Predicted Classe')
+results
+```
